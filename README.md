@@ -15,6 +15,37 @@ of the Concierge track.
 
 ---
 
+## For reviewers / judges — run it yourself in ~3 minutes
+
+José is a self-contained service you run locally with **your own free Gemini key**
+— nothing of mine, no shared quota, no sign-up. The short version (full testing
+guide in **[MANUAL.md](MANUAL.md)**):
+
+```bash
+# 1. Clone + enter
+git clone https://github.com/TobinoBombarder/concierge-agent.git
+cd concierge-agent
+
+# 2. Install (needs Python 3.12+)
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+
+# 3. Add YOUR free Gemini key — get one at https://aistudio.google.com/apikey
+cp .env.example .env          # then edit .env and set GEMINI_API_KEY=...
+
+# 4. Run the demo page + API
+./.venv/bin/uvicorn api.main:app --port 8000
+# open http://localhost:8000  →  ask "what's my day look like?"
+```
+
+The demo page has an **editable Schedule + To-do panel**: change it and ask, and
+José answers from exactly what you entered — so the source of every reply is
+visible and yours to edit. Only `GEMINI_API_KEY` is required; Google Calendar is
+optional and degrades gracefully without it. See **[MANUAL.md](MANUAL.md)** to
+also test the prompt-injection guardrail, rate limiting, and the MCP server.
+
+---
+
 ## Why an agent?
 
 "What's my day look like?" isn't a database query — it needs **judgement**:
