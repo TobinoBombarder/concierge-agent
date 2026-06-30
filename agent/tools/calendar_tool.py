@@ -41,6 +41,56 @@ _TOKEN_PATH = Path(
 # unbounded list is both a cost and a prompt-bloat risk for the model.
 _MAX_EVENTS = 50
 
+# Demo toggle (OFF by default). When `CONCIERGE_DEMO_CALENDAR=1`, the read returns
+# a built-in sample of today's back-to-back meetings instead of touching Google
+# Calendar — so a public demo / recording can show the "next-meeting prep" and
+# "overcommitted day" features without exposing anyone's real calendar. Read-only
+# sample data only; never enabled in a real deployment.
+_DEMO_CALENDAR = os.environ.get("CONCIERGE_DEMO_CALENDAR", "").strip() in {"1", "true", "yes"}
+
+
+def _demo_events() -> dict[str, Any]:
+    """Return a deterministic sample schedule anchored to *now* (demo mode only).
+
+    Three near-back-to-back meetings (triggers the overcommitted flag) starting
+    soon (so there's a clear "next event" to prep for), then a usable gap before a
+    final event (so a task can be slotted into it). Times are built relative to the
+    current clock so the demo looks live whenever it's recorded.
+    """
+    now = dt.datetime.now().astimezone()
+
+    def at(minutes: int) -> dt.datetime:
+        return now + dt.timedelta(minutes=minutes)
+
+    # (summary, start_offset_min, end_offset_min, location)
+    plan = [
+        ("Design review", 30, 90, "Room 2"),
+        ("1:1 with mentor", 95, 155, ""),
+        ("Client call: Henderson landscaping quote", 160, 220, ""),
+        ("Gym session", 280, 340, "Riverside"),
+    ]
+    events: list[dict[str, Any]] = []
+    for summary, start_min, end_min, location in plan:
+        start, end = at(start_min), at(end_min)
+        events.append(
+            {
+                "id": f"demo-{start_min}",
+                "summary": summary,
+                "all_day": False,
+                "start": start.strftime("%H:%M"),
+                "end": end.strftime("%H:%M"),
+                "start_iso": start.isoformat(),
+                "end_iso": end.isoformat(),
+                "location": location,
+            }
+        )
+
+    payload = _empty()
+    payload["events"] = events
+    payload["count"] = len(events)
+    payload["demo"] = True
+    return payload
+
 
 def _empty(error: str | None = None) -> dict[str, Any]:
     """Build the standard empty payload, optionally with an error note."""
@@ -153,6 +203,10 @@ def read_calendar_today() -> dict[str, Any]:
     returns an empty `events` list plus an `error` message instead of raising.
     No events today is a normal result (empty list, no error), not a failure.
     """
+    # Demo mode short-circuits before any OAuth — sample data, read-only.
+    if _DEMO_CALENDAR:
+        return _demo_events()
+
     creds, error = _load_credentials()
     if error:
         return _empty(error)
