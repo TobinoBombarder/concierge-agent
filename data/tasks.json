@@ -1,0 +1,49 @@
+{
+  "tasks": [
+    {
+      "id": "t1",
+      "title": "Finish Kaggle capstone writeup (≤2500 words)",
+      "priority": "high",
+      "due": "2026-06-26",
+      "estimated_minutes": 90,
+      "status": "in_progress",
+      "notes": "Needs architecture diagram + concept mapping section."
+    },
+    {
+      "id": "t2",
+      "title": "Record 5-minute demo video for capstone",
+      "priority": "high",
+      "due": "2026-06-27",
+      "estimated_minutes": 60,
+      "status": "todo",
+      "notes": "Screen-record the agent answering 'what's my day look like?'"
+    },
+    {
+      "id": "t3",
+      "title": "Reply to landscaping client about quote",
+      "priority": "medium",
+      "due": "2026-06-25",
+      "estimated_minutes": 15,
+      "status": "todo",
+      "notes": "They asked for a revised price by end of day."
+    },
+    {
+      "id": "t4",
+      "title": "Renew gym membership",
+      "priority": "low",
+      "due": "2026-06-30",
+      "estimated_minutes": 10,
+      "status": "todo",
+      "notes": ""
+    },
+    {
+      "id": "t5",
+      "title": "Weekly review + plan next sprint",
+      "priority": "medium",
+      "due": "2026-06-28",
+      "estimated_minutes": 45,
+      "status": "todo",
+      "notes": "Recurring Sunday ritual."
+    }
+  ]
+}

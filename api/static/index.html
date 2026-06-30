@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>José — your daily concierge</title>
+  <!--
+    Public, no-login demo page for the Kaggle capstone (Concierge track).
+    Self-contained: inline CSS + JS, zero external requests, so it serves
+    reliably from the same Cloud Run container as the API. It just POSTs to
+    /chat and renders replies. The real product is the chat bubble inside the
+    life-os-prime dashboard; this is the judge-facing "try it" surface.
+  -->
+  <style>
+    /* --- Design tokens ---------------------------------------------------- */
+    :root {
+      --bg: #14110f;          /* warm near-black */
+      --surface: #211c19;     /* card */
+      --surface-2: #2c2521;   /* user bubble */
+      --line: #3a322d;
+      --text: #f3ede7;
+      --muted: #a89b90;
+      --accent: #e8843c;      /* José's warm terracotta signature */
+      --accent-ink: #1a1208;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(120% 80% at 50% 0%, #20191400 0%, var(--bg) 60%), var(--bg);
+      color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: clamp(12px, 4vw, 40px);
+    }
+    .app {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      height: min(100%, 760px);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 24px 60px -20px #000;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .avatar {
+      width: 42px; height: 42px; flex: none;
+      border-radius: 50%;
+      display: grid; place-items: center;
+      font-weight: 700; font-size: 18px;
+      color: var(--accent-ink);
+      background: linear-gradient(140deg, #f5b36b, var(--accent));
+      box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+    }
+    .who h1 { margin: 0; font-size: 17px; letter-spacing: .2px; }
+    .who p { margin: 1px 0 0; font-size: 13px; color: var(--muted); }
+    .dot { color: #5fd07f; }
+
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg { max-width: 82%; padding: 11px 14px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; }
+    .msg.bot { background: var(--surface-2); border: 1px solid var(--line); border-bottom-left-radius: 4px; align-self: flex-start; }
+    .msg.me  { background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; align-self: flex-end; font-weight: 500; }
+    .msg.blocked { border-color: #6b4a2a; color: #f0c79a; }
+    .typing { color: var(--muted); font-style: italic; }
+
+    form {
+      display: flex; gap: 10px;
+      padding: 14px; border-top: 1px solid var(--line);
+    }
+    #input {
+      flex: 1; min-height: 46px; resize: none;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 12px;
+      padding: 12px 14px; font: inherit;
+    }
+    #input:focus-visible, #send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #send {
+      flex: none; min-width: 46px; min-height: 46px; padding: 0 18px;
+      border: none; border-radius: 12px; cursor: pointer;
+      background: var(--accent); color: var(--accent-ink);
+      font: inherit; font-weight: 700;
+    }
+    #send:disabled { opacity: .5; cursor: not-allowed; }
+    .hint { text-align: center; color: var(--muted); font-size: 12px; padding: 0 14px 14px; }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .msg { animation: rise .18s ease-out; }
+      @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" role="main">
+    <header>
+      <div class="avatar" aria-hidden="true">J</div>
+      <div class="who">
+        <h1 id="name">José</h1>
+        <p><span class="dot">●</span> your daily concierge</p>
+      </div>
+    </header>
+
+    <div id="log" aria-live="polite" aria-label="Conversation"></div>
+
+    <form id="form">
+      <textarea id="input" rows="1" placeholder="Ask about your day, schedule, or tasks…"
+                aria-label="Your message" autocomplete="off"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+    <p class="hint">Demo for Kaggle judges · ask “what's my day look like?”</p>
+  </main>
+
+  <script>
+    // Where the agent API lives. Empty string = same origin (when this page is
+    // served by the Cloud Run container itself). To host this page elsewhere
+    // (e.g. Vercel), set window.CONCIERGE_API_BASE to the Cloud Run URL before
+    // this script runs, or hardcode it here, e.g.:
+    //   const API_BASE = "https://concierge-xxxx.run.app";
+    // and add that page's origin to CONCIERGE_ALLOWED_ORIGINS on the server.
+    const API_BASE = (window.CONCIERGE_API_BASE || "").replace(/\/$/, "");
+
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const send = document.getElementById("send");
+
+    function bubble(text, cls) {
+      const el = document.createElement("div");
+      el.className = "msg " + cls;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+
+    // Greet from the server so the name/greeting stay a single source of truth.
+    async function greet() {
+      try {
+        const r = await fetch(API_BASE + "/greeting");
+        const data = await r.json();
+        document.getElementById("name").textContent = data.name || "José";
+        bubble(data.greeting || "Hey there — how can I help you today?", "bot");
+      } catch {
+        bubble("Hey there, I'm José — how can I help you today?", "bot");
+      }
+    }
+
+    async function ask(message) {
+      const typing = bubble("José is thinking…", "bot typing");
+      try {
+        const res = await fetch(API_BASE + "/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+        const data = await res.json();
+        typing.remove();
+        bubble(data.reply || "(no response)", data.blocked ? "bot blocked" : "bot");
+      } catch {
+        typing.remove();
+        bubble("Sorry, I couldn't reach the server. Please try again.", "bot blocked");
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const message = input.value.trim();
+      if (!message) return;
+      bubble(message, "me");
+      input.value = "";
+      send.disabled = true;
+      await ask(message);
+      send.disabled = false;
+      input.focus();
+    });
+
+    // Enter sends, Shift+Enter for a newline.
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+    });
+
+    greet();
+  </script>
+</body>
+</html>

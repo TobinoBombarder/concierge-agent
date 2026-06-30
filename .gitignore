@@ -1,0 +1,20 @@
+# --- Secrets (capstone rules penalize committed secrets — NEVER commit these) ---
+.env
+credentials.json        # Google OAuth client secrets (downloaded from Cloud Console)
+token.json              # cached OAuth user token after first consent
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/

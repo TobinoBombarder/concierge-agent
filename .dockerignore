@@ -1,0 +1,21 @@
+# Keep the image small and secret-free.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets — must never enter the image (also gitignored).
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+*.pem
+*.key
+
+# Dev-only / docs not needed at runtime.
+.git/
+.gitignore
+.DS_Store
+PROGRESS.md

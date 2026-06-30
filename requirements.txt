@@ -1,0 +1,19 @@
+# --- Core agent framework (course stack: Google ADK + Gemini) ---
+google-adk>=0.3.0            # Google Agent Development Kit — orchestrator + sub-agents
+google-genai>=0.3.0         # Gemini model client (used by ADK under the hood)
+
+# --- API layer ---
+fastapi>=0.110.0            # exposes POST /chat for the Next.js dashboard
+uvicorn[standard]>=0.29.0   # ASGI server to run FastAPI locally / in a container
+pydantic>=2.6.0             # request/response validation for /chat
+
+# --- MCP (Day 2 interoperability concept) ---
+mcp>=1.2.0                  # Model Context Protocol server SDK (wraps the calendar tool)
+
+# --- Google Calendar (read-only OAuth) ---
+google-api-python-client>=2.120.0   # Calendar API client
+google-auth>=2.28.0                 # OAuth credential handling
+google-auth-oauthlib>=1.2.0         # OAuth installed-app flow (one-time consent)
+
+# --- Config ---
+python-dotenv>=1.0.0       # loads GEMINI_API_KEY etc. from .env (never hardcoded)
