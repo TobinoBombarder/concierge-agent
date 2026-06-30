@@ -1,7 +1,11 @@
 # --- Secrets (capstone rules penalize committed secrets — NEVER commit these) ---
+# NOTE: .gitignore treats a trailing "# ..." as part of the pattern, so keep
+# comments on their own lines — never inline after a filename.
 .env
-credentials.json        # Google OAuth client secrets (downloaded from Cloud Console)
-token.json              # cached OAuth user token after first consent
+# Google OAuth client secrets (downloaded from Cloud Console)
+credentials.json
+# cached OAuth user token after first consent
+token.json
 *.pem
 *.key
 
