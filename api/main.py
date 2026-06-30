@@ -18,6 +18,7 @@ service scales horizontally on Cloud Run with no shared state to coordinate.
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from agent.guardrails import check_input
 from agent.orchestrator import get_root_agent
+from agent.request_context import reset_provided_briefing, set_provided_briefing
 from api.rate_limit import FixedWindowLimiter
 
 # --- Config -----------------------------------------------------------------
@@ -88,20 +90,58 @@ app.add_middleware(
 )
 
 
+# Caps on caller-provided context — it's untrusted browser input, so bound the
+# list sizes (prompt-bloat + abuse guard). A real day is a handful of each.
+_MAX_SCHEDULE_ITEMS = 30
+_MAX_TASK_ITEMS = 50
+_VALID_PRIORITIES = {"high", "medium", "low"}
+
+
+class ScheduleItem(BaseModel):
+    """One event the user typed into the demo schedule. Times are 24h `HH:MM`."""
+
+    title: str = Field(default="", max_length=200)
+    start: str = Field(default="", max_length=5)
+    end: str = Field(default="", max_length=5)
+    location: str = Field(default="", max_length=200)
+
+
+class TaskItem(BaseModel):
+    """One to-do the user typed into the demo list."""
+
+    title: str = Field(default="", max_length=200)
+    priority: str = Field(default="medium", max_length=10)
+    due: str | None = Field(default=None, max_length=40)
+
+
 class ChatRequest(BaseModel):
-    """One chat turn from the widget.
+    """One chat turn from the widget or demo page.
 
     Canonical field is `message`; `text` is accepted as an alias because the
     dashboard's existing coach widget posts `{ text }`, so a future shared client
     needs no reshaping. Pydantic enforces the type at the boundary.
+
+    `schedule` and `tasks` are OPTIONAL per-request context: the demo page sends
+    the schedule + to-do the user edited on screen so José answers from exactly
+    that. When omitted, the agent falls back to the real calendar + tasks.json.
     """
 
     message: str | None = Field(default=None, description="The user's chat message.")
     text: str | None = Field(default=None, description="Alias for `message`.")
+    schedule: list[ScheduleItem] | None = Field(
+        default=None, description="User-edited schedule for today (demo page)."
+    )
+    tasks: list[TaskItem] | None = Field(
+        default=None, description="User-edited to-do list (demo page)."
+    )
 
     def content(self) -> str:
         """Return whichever field the caller populated (message wins)."""
         return self.message if self.message is not None else (self.text or "")
+
+    def has_context(self) -> bool:
+        """True if the caller supplied an on-screen schedule or to-do list."""
+        return self.schedule is not None or self.tasks is not None
 
 
 class ChatResponse(BaseModel):
@@ -141,6 +181,67 @@ async def _run_one_turn(question: str) -> str:
         if is_final and event.is_final_response() and event.content and event.content.parts:
             final_text = "".join(part.text or "" for part in event.content.parts)
     return final_text
+
+
+def _parse_hhmm_today(value: str) -> dt.datetime | None:
+    """Turn a 24h `HH:MM` string into a tz-aware datetime anchored to today.
+
+    Defensive: returns None on any malformed value (it's untrusted UI input), so a
+    bad row is skipped rather than crashing the analysis.
+    """
+    parts = (value or "").split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        moment = dt.time(int(parts[0]), int(parts[1]))
+    except (ValueError, TypeError):
+        return None
+    return dt.datetime.combine(dt.date.today(), moment).astimezone()
+
+
+def _build_provided_briefing(payload: ChatRequest) -> dict[str, Any]:
+    """Convert the user's on-screen schedule + to-do into the agent's data shape.
+
+    Schedule rows become events with `start_iso`/`end_iso` (today's date) so the
+    deterministic `analyze_schedule` can compute next-event / overcommitted / gaps.
+    Rows with unparseable times or empty task titles are dropped. Lists are capped.
+    """
+    events: list[dict[str, Any]] = []
+    for item in (payload.schedule or [])[:_MAX_SCHEDULE_ITEMS]:
+        start, end = _parse_hhmm_today(item.start), _parse_hhmm_today(item.end)
+        if not (start and end):
+            continue
+        events.append(
+            {
+                "summary": item.title.strip() or "(no title)",
+                "all_day": False,
+                "start": start.strftime("%H:%M"),
+                "end": end.strftime("%H:%M"),
+                "start_iso": start.isoformat(),
+                "end_iso": end.isoformat(),
+                "location": item.location.strip(),
+            }
+        )
+
+    tasks: list[dict[str, Any]] = []
+    for raw in (payload.tasks or [])[:_MAX_TASK_ITEMS]:
+        title = raw.title.strip()
+        if not title:
+            continue
+        priority = raw.priority.strip().lower()
+        if priority not in _VALID_PRIORITIES:
+            priority = "medium"
+        tasks.append(
+            {
+                "title": title,
+                "priority": priority,
+                "due": raw.due or None,
+                "estimated_minutes": 0,
+                "status": "todo",
+            }
+        )
+
+    return {"events": events, "tasks": tasks}
 
 
 def _client_ip(request: Request) -> str:
@@ -207,6 +308,13 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         # tag it so the widget/telemetry can distinguish a blocked turn.
         return ChatResponse(reply=guard.message, blocked=True, reason=guard.reason)
 
+    # If the page sent the user's on-screen schedule + to-do, make that the source
+    # for THIS request (reset in finally so it never leaks to another request).
+    token = (
+        set_provided_briefing(_build_provided_briefing(payload))
+        if payload.has_context()
+        else None
+    )
     try:
         reply = await _run_one_turn(guard.text)
     except Exception as exc:  # noqa: BLE001 — never leak a stack trace to the browser
@@ -217,5 +325,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             blocked=False,
             reason="agent_error",
         )
+    finally:
+        if token is not None:
+            reset_provided_briefing(token)
 
     return ChatResponse(reply=reply or "(no response)")

@@ -101,6 +101,44 @@
     #send:disabled { opacity: .5; cursor: not-allowed; }
     .hint { text-align: center; color: var(--muted); font-size: 12px; padding: 0 14px 14px; }
 
+    /* --- Editable "source" panel: the schedule + to-do José actually reads ---- */
+    .source { border-bottom: 1px solid var(--line); background: #1b1714; }
+    .source > summary {
+      cursor: pointer; list-style: none;
+      padding: 12px 20px; font-size: 13px; font-weight: 600; color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .source > summary::-webkit-details-marker { display: none; }
+    .source > summary::before { content: "▸"; color: var(--accent); transition: transform .15s; }
+    .source[open] > summary::before { transform: rotate(90deg); }
+    .source > summary .tag { color: var(--muted); font-weight: 400; }
+    .source-body { padding: 4px 20px 16px; max-height: 280px; overflow-y: auto; }
+    .src-block { margin-top: 10px; }
+    .src-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .rows { display: flex; flex-direction: column; gap: 6px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .row input, .row select {
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 8px;
+      padding: 6px 8px; font: inherit; font-size: 13px;
+    }
+    .row input[type="time"] { width: 92px; flex: none; }
+    .row .ev-title, .row .tk-title { flex: 1; min-width: 120px; }
+    .row .ev-loc { width: 96px; }
+    .row select { flex: none; }
+    .row input:focus-visible, .row select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .mini, .rm {
+      background: transparent; color: var(--accent);
+      border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+      font: inherit; font-size: 12px; padding: 4px 9px;
+    }
+    .mini:hover, .rm:hover { border-color: var(--accent); }
+    .rm { flex: none; color: var(--muted); padding: 4px 10px; line-height: 1; }
+
     @media (prefers-reduced-motion: no-preference) {
       .msg { animation: rise .18s ease-out; }
       @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -116,6 +154,20 @@
         <p><span class="dot">●</span> your daily concierge</p>
       </div>
     </header>
+
+    <details class="source" id="source" open>
+      <summary>Your day <span class="tag">— what José reads (edit, then ask)</span></summary>
+      <div class="source-body">
+        <div class="src-block">
+          <div class="src-head"><span>Schedule</span><button type="button" class="mini" id="addEvent">+ event</button></div>
+          <div class="rows" id="events"></div>
+        </div>
+        <div class="src-block">
+          <div class="src-head"><span>To-do</span><button type="button" class="mini" id="addTask">+ task</button></div>
+          <div class="rows" id="tasks"></div>
+        </div>
+      </div>
+    </details>
 
     <div id="log" aria-live="polite" aria-label="Conversation"></div>
 
@@ -140,6 +192,75 @@
     const form = document.getElementById("form");
     const input = document.getElementById("input");
     const send = document.getElementById("send");
+    const eventsEl = document.getElementById("events");
+    const tasksEl = document.getElementById("tasks");
+
+    // --- Editable "source" panel ------------------------------------------------
+    // Times are seeded relative to NOW so the demo always shows a back-to-back
+    // "today" (next-meeting prep + overcommitted flag) — but every field is
+    // editable, and whatever is on screen is exactly what gets sent to José.
+    const clock = (offsetMin) =>
+      new Date(Date.now() + offsetMin * 60000).toTimeString().slice(0, 5);
+
+    function eventRow(ev = {}) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `
+        <input type="time" class="ev-start" value="${ev.start || ""}" aria-label="Start time" />
+        <input type="time" class="ev-end" value="${ev.end || ""}" aria-label="End time" />
+        <input type="text" class="ev-title" value="${ev.title || ""}" placeholder="Event" aria-label="Event title" />
+        <input type="text" class="ev-loc" value="${ev.location || ""}" placeholder="Location" aria-label="Location" />
+        <button type="button" class="rm" aria-label="Remove event">×</button>`;
+      row.querySelector(".rm").addEventListener("click", () => row.remove());
+      eventsEl.appendChild(row);
+    }
+
+    function taskRow(t = {}) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const prio = (p) => (t.priority === p ? "selected" : "");
+      row.innerHTML = `
+        <input type="text" class="tk-title" value="${t.title || ""}" placeholder="Task" aria-label="Task title" />
+        <select class="tk-prio" aria-label="Priority">
+          <option ${prio("high")}>high</option>
+          <option ${t.priority && t.priority !== "high" && t.priority !== "low" ? "selected" : (!t.priority ? "selected" : "")}>medium</option>
+          <option ${prio("low")}>low</option>
+        </select>
+        <button type="button" class="rm" aria-label="Remove task">×</button>`;
+      row.querySelector(".rm").addEventListener("click", () => row.remove());
+      tasksEl.appendChild(row);
+    }
+
+    function collectSchedule() {
+      return [...eventsEl.querySelectorAll(".row")].map((r) => ({
+        start: r.querySelector(".ev-start").value,
+        end: r.querySelector(".ev-end").value,
+        title: r.querySelector(".ev-title").value,
+        location: r.querySelector(".ev-loc").value,
+      }));
+    }
+    function collectTasks() {
+      return [...tasksEl.querySelectorAll(".row")].map((r) => ({
+        title: r.querySelector(".tk-title").value,
+        priority: r.querySelector(".tk-prio").value,
+      }));
+    }
+
+    document.getElementById("addEvent").addEventListener("click", () => eventRow());
+    document.getElementById("addTask").addEventListener("click", () => taskRow());
+
+    // Seed an overcommitted "today" + the capstone to-dos.
+    [
+      { start: clock(30), end: clock(90), title: "Design review", location: "Room 2" },
+      { start: clock(95), end: clock(155), title: "1:1 with mentor", location: "" },
+      { start: clock(160), end: clock(220), title: "Client call: Henderson quote", location: "" },
+      { start: clock(280), end: clock(340), title: "Gym session", location: "Riverside" },
+    ].forEach(eventRow);
+    [
+      { title: "Record 5-minute demo video", priority: "high" },
+      { title: "Finish Kaggle writeup", priority: "medium" },
+      { title: "Reply to landscaping client", priority: "low" },
+    ].forEach(taskRow);
 
     function bubble(text, cls) {
       const el = document.createElement("div");
@@ -168,7 +289,13 @@
         const res = await fetch(API_BASE + "/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
+          // Send the on-screen schedule + to-do so José answers from exactly what
+          // the user sees — the source of every reply is visible and editable.
+          body: JSON.stringify({
+            message,
+            schedule: collectSchedule(),
+            tasks: collectTasks(),
+          }),
         });
         const data = await res.json();
         typing.remove();

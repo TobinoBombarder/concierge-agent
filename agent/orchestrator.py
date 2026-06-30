@@ -42,6 +42,7 @@ if os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
 
 from agent.prioritizer import analyze_schedule, build_prioritizer_agent
+from agent.request_context import get_provided_briefing
 from agent.tools.calendar_tool import read_calendar_today
 from agent.tools.tasks_tool import read_tasks
 
@@ -49,12 +50,29 @@ from agent.tools.tasks_tool import read_tasks
 def get_day_briefing_data() -> dict[str, Any]:
     """Fetch today's calendar events and open tasks and compute the schedule analysis.
 
-    Reads the calendar and tasks directly (in Python) and returns `events`,
-    `tasks`, and `analysis` (next event, overcommitted flag, free gaps, ranked
-    tasks), plus any soft `calendar_error` / `tasks_error`. Call this once, first,
-    for any question about the user's day, schedule, meetings, or priorities — the
-    analysis is computed here so it never depends on the model re-passing data.
+    Returns `events`, `tasks`, and `analysis` (next event, overcommitted flag, free
+    gaps, ranked tasks), plus any soft `calendar_error` / `tasks_error`. Call this
+    once, first, for any question about the user's day, schedule, meetings, or
+    priorities — the analysis is computed here so it never depends on the model
+    re-passing data.
+
+    Source of the events/tasks: if the caller supplied a per-request briefing (the
+    demo page sends the schedule + to-do the user edited on screen), use exactly
+    that, so the answer is transparently grounded in what the user entered.
+    Otherwise read the real calendar + tasks.json.
     """
+    provided = get_provided_briefing()
+    if provided is not None:
+        events = provided.get("events", [])
+        tasks = provided.get("tasks", [])
+        return {
+            "events": events,
+            "tasks": tasks,
+            "analysis": analyze_schedule(events, tasks),
+            "calendar_error": None,
+            "tasks_error": None,
+        }
+
     tasks_payload = read_tasks()
     calendar_payload = read_calendar_today()
     tasks = tasks_payload.get("tasks", [])
